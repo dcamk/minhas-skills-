@@ -4,7 +4,7 @@ Coleção pessoal de skills para o Claude Code.
 
 ## Skills
 
-- [`youtube-para-skill`](youtube-para-skill/) — pesquisa um assunto no YouTube, extrai e limpa transcrições, ranqueia pelo que importa para os seus projetos e gera uma `SKILL.md` compacta.
+- [`youtube-para-skill`](youtube-para-skill/) — pesquisa um assunto no YouTube, extrai e limpa transcrições, interpreta o que acontece na tela do vídeo (cliques, menus, comandos) e encaixa na transcrição, ranqueia pelo que importa para os seus projetos e gera uma `SKILL.md` compacta.
 
 ## Como usar
 
