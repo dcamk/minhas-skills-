@@ -1,6 +1,6 @@
 ---
 name: youtube-para-skill
-description: Pesquisa um assunto no YouTube navegando como usuário (navegador anônimo, sem login, sem API), lê páginas como texto sem screenshot, extrai e limpa transcrições, remove propaganda, ranqueia o conteúdo pelos projetos do usuário, pede aprovação item a item e gera uma SKILL.md compacta. Use quando pedirem "crie uma skill sobre X a partir do YouTube", "aprenda X pelo YouTube" ou "extraia conhecimento de vídeos".
+description: Pesquisa um assunto no YouTube navegando como usuário (navegador anônimo, sem login, sem API), lê páginas como texto sem screenshot, extrai e limpa transcrições, interpreta o que acontece na tela do vídeo (cliques, menus, comandos, configurações) e encaixa na transcrição, remove propaganda, ranqueia o conteúdo pelos projetos do usuário, pede aprovação item a item e gera uma SKILL.md compacta. Use quando pedirem "crie uma skill sobre X a partir do YouTube", "aprenda X pelo YouTube" ou "extraia conhecimento de vídeos".
 ---
 
 # YouTube → Skill
@@ -18,19 +18,23 @@ Caminhos `scripts/`, `modelos/` e `referencias/` são relativos à pasta desta s
 | transcrição (2ª opção) | **yt-dlp** → `scripts/obter_transcricao.py <id>` | legendas manuais ou automáticas |
 | transcrição (3ª opção) | **yt-dlp + ffmpeg + OpenAI Whisper** → `scripts/obter_transcricao.py <id> --audio` | vídeo sem legenda; US$ 0,006/min |
 | limpar e tirar propaganda | `scripts/limpar.py` | regras + capítulos + selo "promoção paga" |
+| ver o que acontece no vídeo | **yt-dlp + ffmpeg** → `scripts/quadros.py <id>` | baixa o vídeo (até 720p, sem áudio), detecta mudanças de tela e ações narradas, extrai só esses quadros |
+| interpretar a tela | Claude Sonnet 5.5 (visão) lendo os quadros | regras em `referencias/interpretacao-visual.md` |
+| juntar fala + ação | `scripts/mesclar.py <id>` | gera a transcrição enriquecida |
 | ranquear e fundir repetidos | `scripts/ranquear.py` | ordena por relevância aos projetos |
 | aplicar escolha do usuário | `scripts/decidir.py` | adicionar / descartar |
 | modelo de IA | Claude Sonnet 5.5 conduz; Claude Haiku 5.5 extrai (subagente) | sem modelo local |
 
-Proibido: `browser_take_screenshot`, `browser_snapshot` da página inteira, YouTube Data API, login.
+Proibido: `browser_take_screenshot`, `browser_snapshot` da página inteira, YouTube Data API, login. Imagens só dos quadros do vídeo baixado (Etapa 6B), nunca da página do navegador.
 
 ## Instalação (uma vez)
 1. Node 18+, Google Chrome, Python 3.10+.
 2. `claude mcp add playwright -- npx @playwright/mcp@latest --browser chrome --isolated --snapshot-mode none --viewport-size 1366x768 --caps vision --output-dir ./trabalho`
    (Claude Desktop: usar `config/playwright-mcp.json`.)
 3. `pip install yt-dlp requests`
-4. Só para a 3ª opção de transcrição: `ffmpeg` no PATH e `OPENAI_API_KEY`.
-5. Copiar `modelos/projetos.md` para `./projetos.md` e preencher.
+4. `ffmpeg` no PATH (quadros e áudio).
+5. Só para a 3ª opção de transcrição: `OPENAI_API_KEY`.
+6. Copiar `modelos/projetos.md` para `./projetos.md` e preencher.
 
 ## Etapa 0 — Preparar
 1. Ler `./projetos.md`; se não existir, `modelos/projetos.md` preenchido na pasta da skill; se nenhum, perguntar ao usuário 1–3 projetos (objetivo, ferramentas, problemas) e criar `./projetos.md`.
@@ -85,9 +89,22 @@ Separar N principais + 3 reservas.
 
 O que conta como propaganda: patrocínio, cupom, código de desconto, link de compra/afiliado, venda de curso/mentoria/produto do autor, pedido de inscrição/like, capítulo com título publi/patrocínio/oferta, vídeo com selo "Inclui promoção paga", descrição com #publi/parceria paga.
 
+## Etapa 6B — Interpretar o que acontece no vídeo
+Executar sempre que o vídeo mostra tela, programa, configuração, código, montagem ou procedimento físico.
+1. `python scripts/quadros.py <id>` (padrão: até 40 quadros, 1024 px).
+   - `demonstrativo: false` e assunto só falado (palestra, opinião) → pular para Etapa 7 usando `<id>.limpo.txt`.
+   - Ações rápidas perdidas → repetir com `--sensibilidade 3 --max 60`.
+2. Ler `trabalho/<id>.quadros.json`; descartar quadros cujo `t` caiu em faixa de propaganda (`<id>.filtro.json`).
+3. Abrir os quadros em lotes de 6, em ordem, seguindo `referencias/interpretacao-visual.md` (subagente Sonnet, um vídeo por subagente).
+4. Gravar `trabalho/<id>.acoes.json`.
+5. `python scripts/mesclar.py <id>` → `trabalho/<id>.enriquecido.txt` (fala + linhas `▶` com a ação na tela).
+6. Apagar `trabalho/<id>.mp4` após a mesclagem.
+
 ## Etapa 7 — Extrair conteúdo
 Por vídeo (subagente com modelo Haiku quando disponível; um vídeo por subagente):
-- Entrada: `<id>.limpo.txt` + `./projetos.md`. Nunca ler `.transcricao.json`.
+- Entrada: `<id>.enriquecido.txt` (ou `<id>.limpo.txt` se não houve Etapa 6B) + `./projetos.md`. Nunca ler `.transcricao.json`.
+- Linhas `▶` viram itens `passo` com caminho exato: `em <programa> > <tela>: <ação> "<alvo>" = <valor> → <resultado>`. Comandos e código vão completos no `texto` (limite de 25 palavras não se aplica a eles).
+- Passo narrado sem `▶` correspondente: manter só se a fala disser onde e como.
 - Saída: `trabalho/<id>.itens.json`, máx. 20 itens:
 ```json
 [{"tipo":"passo|numero|erro|cuidado|ferramenta|fato|conceito","texto":"frase telegráfica ≤ 25 palavras","t":125,"projeto":"nome do projeto ou -","relevancia":3,"motivo":"≤ 12 palavras"}]
@@ -103,7 +120,7 @@ Mostrar ao usuário, nesta ordem:
 1. Um cartão por vídeo usado:
 ```
 ▶ <título> — <canal> — <duração> — https://youtu.be/<id>
-  propaganda removida: <fração>% (<faixas m:ss>) | itens extraídos: <n>
+  propaganda removida: <fração>% (<faixas m:ss>) | ações na tela: <n> | itens extraídos: <n>
   conteúdo: <1 linha do que o vídeo ensina>
 ```
 2. Vídeos descartados: título + motivo (comercial / sem transcrição / pouco conteúdo).
@@ -133,7 +150,8 @@ Sortear valor diferente a cada pausa. Uma aba só. Sem abrir URLs de vídeo dire
 ## Economia de tokens
 - Elemento para clicar: `browser_find` pelo texto; `browser_snapshot` só com `depth` ≤ 3 quando `browser_find` falhar.
 - Dado grande (transcrição, descrição): `browser_evaluate` com `filename`; ler o arquivo limpo, nunca o bruto.
-- Extração em subagente Haiku; condução em Sonnet.
+- Extração em subagente Haiku; condução e leitura de quadros em Sonnet.
+- Quadros: só os que `quadros.py` escolheu, 1024 px (~800 tokens cada); nunca o vídeo inteiro.
 - Não repetir leitura de arquivo já lido. Não reabrir vídeo do histórico.
 
 ## Falhas
@@ -143,6 +161,8 @@ Sortear valor diferente a cada pausa. Uma aba só. Sem abrir URLs de vídeo dire
 | resultados vazios | esperar 3 s, `PageDown`, repetir `resultados.js` |
 | painel de transcrição não abre | `abrir_transcricao.js` → `obter_transcricao.py` → `--audio` |
 | tela de verificação | fechar navegador, esperar 10 min, reabrir; 2ª vez → encerrar |
+| `quadros.py` não baixa o vídeo | repetir após 1 min; persistindo, seguir só com a fala |
+| texto da tela ilegível | quadro vizinho; senão `confianca: "baixa"` |
 | vídeo comercial | descartar, abrir reserva |
 | < 3 vídeos válidos | nova busca com variação do termo |
 
@@ -154,3 +174,4 @@ Sortear valor diferente a cada pausa. Uma aba só. Sem abrir URLs de vídeo dire
 | tudo em Haiku 5.5 (API) | ~US$ 0,03–0,06 por skill |
 | plano Claude (Pro/Max) no Claude Code | sem cobrança por token; consome o limite do plano |
 | Whisper (só vídeo sem legenda) | US$ 0,006/min ≈ US$ 0,09 por vídeo de 15 min |
+| leitura de quadros, Sonnet 5.5 (40 quadros × ~800 tokens + saída) | ~US$ 0,10 por vídeo demonstrativo |

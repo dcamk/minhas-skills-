@@ -35,7 +35,12 @@ description: <1 linha: quando usar>
 - <projeto>: <itens de relevância 3 em 1 linha>
 
 ## Procedimento
-1. <passo>
+1. <Programa> > <Menu> > <Tela>: <ação> **<rótulo exato>** → <resultado esperado>
+2. Digitar em **<campo>**: `<valor>`
+3. Executar:
+   ```
+   <comando ou código completo>
+   ```
 
 ## Valores de referência
 | parâmetro | valor |
